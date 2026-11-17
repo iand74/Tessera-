@@ -99,6 +99,7 @@ main{display:flex;flex-direction:column;gap:10px;flex:1}
 .pb-main{display:flex;gap:calc(var(--T)*.42);align-items:flex-start}
 .lines{display:flex;flex-direction:column;gap:var(--g)}
 .line{display:flex;justify-content:flex-end;gap:var(--g);border-radius:9px;padding:2px;margin:-2px;transition:background .2s,box-shadow .2s}
+.line.kept{background:rgba(111,155,232,.25);box-shadow:0 0 0 2px #6f9be8,0 0 14px rgba(111,155,232,.7)}
 .can{cursor:pointer;background:rgba(255,206,92,.38);box-shadow:0 0 0 2px #e0a42a,0 0 14px rgba(224,164,42,.75);animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 2px #f3c04a,0 0 22px rgba(243,192,74,.95)}}
 .slot{width:var(--T);height:var(--T);border-radius:calc(var(--T)*.17);position:relative;flex:none;
@@ -122,6 +123,7 @@ main{display:flex;flex-direction:column;gap:10px;flex:1}
 
 /* popups and toast */
 .pop{position:fixed;z-index:70;pointer-events:none;font-family:Cinzel,Georgia,serif;font-weight:800;font-size:24px;white-space:nowrap;transform:translate(-50%,-50%);text-shadow:0 2px 8px rgba(0,0,0,.7),0 0 2px rgba(0,0,0,.8)}
+.pop.k{color:#fff;font:900 16px Nunito,system-ui,sans-serif;background:rgba(40,60,110,.9);padding:5px 10px;border-radius:10px;text-shadow:none;box-shadow:0 4px 14px rgba(0,0,0,.4)}
 .pop.g{color:#ffe07a}.pop.r{color:#ff8a70}.pop.b{color:#9ff0c0;font-size:20px}
 #toast{position:fixed;left:50%;top:42%;z-index:80;transform:translate(-50%,-50%) scale(.8);opacity:0;pointer-events:none;font-family:Cinzel,Georgia,serif;font-weight:800;font-size:30px;letter-spacing:.12em;color:#fff1bf;
   padding:14px 28px;border-radius:16px;background:rgba(10,14,32,.82);border:1px solid rgba(217,181,74,.6);box-shadow:0 10px 40px rgba(0,0,0,.6);transition:opacity .3s,transform .3s}
@@ -571,8 +573,10 @@ function popAt(el,text,cls){
   if(!el) return;
   const r=rectOf(el), d=document.createElement('div');
   d.className='pop '+cls; d.textContent=text;
-  d.style.left=(r.x+r.w/2)+'px'; d.style.top=(r.y+r.h/2)+'px';
+  d.style.top=(r.y+r.h/2)+'px';
   document.body.appendChild(d);
+  const hw=d.offsetWidth/2, cx=r.x+r.w/2;
+  d.style.left=Math.max(hw+8,Math.min(window.innerWidth-hw-8,cx))+'px';
   if(d.animate) d.animate([{opacity:0,transform:'translate(-50%,-30%) scale(.6)'},{opacity:1,transform:'translate(-50%,-70%) scale(1.15)',offset:.2},{opacity:1,transform:'translate(-50%,-110%) scale(1)',offset:.7},{opacity:0,transform:'translate(-50%,-150%) scale(1)'}],{duration:1300*Math.max(SPEED,.3),easing:'ease-out',fill:'forwards'}).finished.then(()=>d.remove(),()=>d.remove());
   else setTimeout(()=>d.remove(),1200);
 }
@@ -648,9 +652,26 @@ async function runTiling(){
   const gid=GID; busy=true; history=[]; sel=null; render();
   await sleep(450); if(gid!==GID) return;
   const show=async p=>{ if(view!==p){ view=p; render(); await sleep(420); } };
+  let curP=null; const keptShown=new Set();
+  const showKept=async pi=>{
+    keptShown.add(pi);
+    const rows=S.players[pi].lines.map((L,r)=>L.count?r:-1).filter(r=>r>=0);
+    if(!rows.length) return;
+    await show(pi); if(gid!==GID) return;
+    const els=rows.map(r=>$(`#boardWrap .line[data-dest="${r}"]`)).filter(Boolean);
+    els.forEach(e=>e.classList.add('kept'));
+    popAt($('#boardWrap .pb-head')||els[0],rows.length>1?'Unfinished lines stay for next round':'Unfinished line stays for next round','k');
+    await sleep(1400);
+    els.forEach(e=>e.classList.remove('kept'));
+  };
   while(S.queue.length){
     if(gid!==GID) return;
     const a=S.queue[0];
+    if((a.type==='line'||a.type==='floor') && curP!==null && a.p!==curP){ await showKept(curP); if(gid!==GID) return; }
+    if(a.type==='line'||a.type==='floor') curP=a.p;
+    if(a.type==='endcheck' && !S.players.some(p=>p.wall.some(row=>row.every(x=>x)))){
+      for(let i=0;i<S.players.length;i++){ const pi=(curP===null?0:curP+i)%S.players.length; if(!keptShown.has(pi)){ await showKept(pi); if(gid!==GID) return; } }
+    }
     if(a.type==='line'){
       await show(a.p); if(gid!==GID) return;
       const lineTiles=$$(`#boardWrap .line[data-dest="${a.row}"] .slot .tile`);
@@ -773,6 +794,7 @@ function showRules(back){
   <h3>End of round</h3><ul>
   <li>When every factory and the centre are empty, each <b>full</b> pattern line moves one tile across to its matching space on the wall. The rest are discarded.</li>
   <li>A tile with no neighbours scores 1. Otherwise it scores the length of the connected horizontal run plus the connected vertical run it joins.</li>
+  <li>A pattern line that isn’t full keeps its tiles for the next round, so you can finish it later. It glows blue at the end of the round to remind you.</li>
   <li>Floor tiles cost −1, −1, −2, −2, −2, −3, −3. Scores never drop below zero. All scoring is counted for you.</li></ul>
   <h3>End of game</h3><ul>
   <li>The game ends after the round in which anyone completes a horizontal row of their wall.</li>
